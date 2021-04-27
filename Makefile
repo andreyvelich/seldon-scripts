@@ -1,5 +1,5 @@
 deploy:
-	bash scripts/deploy.sh
+	bash deploy.sh
 
 undeploy:
 	kind delete cluster

@@ -19,8 +19,24 @@ seldon-controller-manager-6884bd657d-mk5z5   1/1     Running   0          39s
 
 ## Run upscale script
 
+Install required Go packages by running:
+
 ```
-go run upscale.go -f model.yaml -kubeconfig /Users/avelichk/.kub
+go mod download
+```
+
+To deploy model deployment and upscale replicas to 2 run,
+where `model.yaml` is the Seldon Deployment YAML path:
+
+```
+go run upscale.go -f model.yaml
+```
+
+This script uses kubeconfig from `$HOME/.kube/config`. If you want to use different
+config run:
+
+```
+go run upscale.go -f model.yaml -kubeconfig <path-to-kubeconfig>
 ```
 
 ## Undeploy

@@ -22,54 +22,59 @@ import (
 	seldonv1 "github.com/seldonio/seldon-core/operator/apis/machinelearning.seldon.io/v1"
 )
 
+var (
+	timeout  = 30 * time.Minute
+	replicas = int32(2)
+)
+
 func main() {
-	deployYAMLPath := flag.String("f", "", "Path to the model deployment YAML file")
+	deployYAMLPath := flag.String("f", "", "Path to the Seldon Deployment YAML file")
 	flag.Parse()
 
 	// Verify that file path is set.
 	if *deployYAMLPath == "" {
-		log.Fatal("Path for model deployment YAML must be set")
+		log.Fatal("Path for Seldon Deployment YAML must be set")
 	}
 
-	log.Printf("Seldon model deployment file path: %v", *deployYAMLPath)
+	log.Printf("Seldon model Deployment file path: %v", *deployYAMLPath)
 
-	// Get the new Kubernetes client.
-	client, err := getClient()
+	// Get the new controller-runtime and clientset client.
+	client, clientset, err := getClient()
 	if err != nil {
 		log.Fatalf("Unable to get Kubernetes client, error: %v", err)
 	}
 
-	// Create Seldon Deployment.
-	name, uid, namespace, err := createSeldonDeployment(client, *deployYAMLPath)
+	// Step 1. Create the Seldon Deployment.
+	name, UID, namespace, err := createSeldonDeployment(client, *deployYAMLPath)
 	if err != nil {
 		log.Fatalf("Unable to create Seldon Deployment, error: %v", err)
 	}
 	log.Printf("Seldon Deployment has been created. Name: %v, namespace: %v", name, namespace)
 
-	// Watch for Kubernetes events for Seldon deployment.
-	go watchEvents(uid, namespace)
+	// Step 2. Print the Kubernetes events for the Seldon Deployment.
+	go printEvents(clientset, UID, namespace)
 
-	// Wait until Seldon Deployment is available.
+	// Step 3. Wait until the Seldon Deployment is available.
 	err = waitSeldonDeploymentAvailable(client, name, namespace)
 	if err != nil {
 		log.Fatalf("Unable to wait for available Seldon Deployment, error: %v", err)
 	}
 
-	// Scale replicas to 2 for the Seldon Deployment.
-	replicas := int32(2)
+	// Step 4. Scale replicas to 2 for the Seldon Deployment.
 	err = scaleSeldonDeployment(client, name, namespace, &replicas)
 	if err != nil {
 		log.Fatalf("Unable to scale Seldon Deployment, error: %v", err)
 	}
 	log.Printf("Seldon Deployment is scaling to %v replicas", replicas)
-	// Wait until Seldon Deployment is available.
+
+	// Step 5. Wait until the Seldon Deployment is available.
 	err = waitSeldonDeploymentAvailable(client, name, namespace)
 	if err != nil {
 		log.Fatalf("Unable to wait for available Seldon Deployment, error: %v", err)
 	}
 	log.Printf("Seldon Deployment scaled with %v replicas", replicas)
 
-	// Delete Seldon Deployment.
+	// Step 6. Delete the Seldon Deployment.
 	err = deleteSeldonDeployment(client, name, namespace)
 	if err != nil {
 		log.Fatalf("Unable to delete Seldon Deployment, error: %v", err)
@@ -77,51 +82,50 @@ func main() {
 	log.Print("Seldon Deployment has been deleted")
 }
 
-// getClient returns the controller-runtime client
+// Get the controller-runtime and client-go client.
 // Specify -kubeconfig flag to set the custom config path.
-func getClient() (client.Client, error) {
+func getClient() (client.Client, *kubernetes.Clientset, error) {
 
-	// Create the new Kubernetes client.
-	config, err := config.GetConfig()
-	if err != nil {
-		log.Printf("Unable to get kubeconfig")
-		return nil, err
-	}
 	// Add Seldon types to scheme.
 	seldonv1.AddToScheme(scheme.Scheme)
-	client, err := client.New(config, client.Options{})
-	if err != nil {
-		log.Printf("Unable to create new client")
-		return nil, err
-	}
 
-	return client, nil
-}
-
-// Watches for Seldon Deployments events and print them.
-func watchEvents(uid, namespace string) {
-
-	// For events we use ClientSet.
 	config, err := config.GetConfig()
 	if err != nil {
-		log.Fatalf("Unable to get kubeconfig, error: %v", err)
+		log.Print("Unable to get kubeconfig")
+		return nil, nil, err
 	}
 
+	// Create the new controller-runtime client.
+	client, err := client.New(config, client.Options{})
+	if err != nil {
+		log.Print("Unable to create new client")
+		return nil, nil, err
+	}
+
+	// Create the new ClientSet for events.
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		log.Fatalf("Unable to create new clientset, error: %v", err)
+		log.Print("Unable to create new clientset")
+		return nil, nil, err
 	}
+
+	return client, clientset, nil
+}
+
+// Print events for the Seldon Deployment.
+func printEvents(clientset *kubernetes.Clientset, UID, namespace string) {
 
 	// To not print previous events for the same object name, we will take object's UID.
 	watchList := cache.NewListWatchFromClient(
 		clientset.CoreV1().RESTClient(),
 		"events",
 		namespace,
-		fields.OneTermEqualSelector("involvedObject.uid", uid),
+		fields.OneTermEqualSelector("involvedObject.uid", UID),
 	)
 	_, ctrl := cache.NewInformer(
 		watchList,
-		&v1.Event{}, 0,
+		&v1.Event{},
+		0,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				event, _ := obj.(*v1.Event)
@@ -138,8 +142,8 @@ func watchEvents(uid, namespace string) {
 	}
 }
 
-// createSeldonDeployment creates Seldon Deployment from the given file.
-// Returns Deployment name and namespace
+// Create Seldon Deployment from the given YAML path.
+// Returns Deployment name, UID and namespace
 func createSeldonDeployment(client client.Client, deployYAMLPath string) (string, string, string, error) {
 
 	// Read file to byte array.
@@ -152,10 +156,10 @@ func createSeldonDeployment(client client.Client, deployYAMLPath string) (string
 	// Convert byte array to SeldonDeployment object
 	sd := &seldonv1.SeldonDeployment{}
 	if err := k8syaml.NewYAMLOrJSONDecoder(byteFile, 1024).Decode(sd); err != nil {
-		log.Printf("Unable to convert YAML to SeldonDeployment")
+		log.Print("Unable to convert YAML to SeldonDeployment")
 		return "", "", "", err
 	}
-	// Set default namespace.
+	// Set the default namespace.
 	if sd.Namespace == "" {
 		sd.Namespace = "default"
 	}
@@ -166,15 +170,12 @@ func createSeldonDeployment(client client.Client, deployYAMLPath string) (string
 		return "", "", "", err
 	}
 
-	return sd.Name, string(sd.GetUID()), sd.Namespace, nil
+	return sd.Name, string(sd.UID), sd.Namespace, nil
 }
 
-// waitSeldonDeploymentAvailable waits until Seldon Deployment is available.
+// Wait until Seldon Deployment is available.
 func waitSeldonDeploymentAvailable(client client.Client, name, namespace string) error {
-	// Wait until Experiment is restarted.
-	timeout := 30 * time.Minute
-	endTime := time.Now().Add(timeout)
-	for time.Now().Before(endTime) {
+	for endTime := time.Now().Add(timeout); time.Now().Before(endTime); {
 		sd := &seldonv1.SeldonDeployment{}
 		if err := client.Get(context.TODO(), types.NamespacedName{Name: name, Namespace: namespace}, sd); err != nil {
 			log.Print("Unable to Get Seldon Deployment")
@@ -193,7 +194,7 @@ func waitSeldonDeploymentAvailable(client client.Client, name, namespace string)
 	return fmt.Errorf("timeout to get available status for Seldon Deployment")
 }
 
-// scaleSeldonDeployment scales Seldon Deployment to 2 replicas.
+// Scale Seldon Deployment to the replicasCount replicas.
 func scaleSeldonDeployment(client client.Client, name, namespace string, replicasCount *int32) error {
 	sd := &seldonv1.SeldonDeployment{}
 	if err := client.Get(context.TODO(), types.NamespacedName{Name: name, Namespace: namespace}, sd); err != nil {
@@ -207,9 +208,8 @@ func scaleSeldonDeployment(client client.Client, name, namespace string, replica
 		return err
 	}
 	// Wait until Seldon Deployment status is changed to Creating.
-	timeout := 30 * time.Minute
-	endTime := time.Now().Add(timeout)
-	for time.Now().Before(endTime) {
+	// Controller takes some time to reconcile this change.
+	for endTime := time.Now().Add(timeout); time.Now().Before(endTime); {
 		sd := &seldonv1.SeldonDeployment{}
 		if err := client.Get(context.TODO(), types.NamespacedName{Name: name, Namespace: namespace}, sd); err != nil {
 			log.Print("Unable to Get Seldon Deployment")
@@ -222,7 +222,7 @@ func scaleSeldonDeployment(client client.Client, name, namespace string, replica
 	return fmt.Errorf("timeout to get creating status for Seldon Deployment")
 }
 
-// deleteSeldonDeployment deletes Seldon Deployment.
+// Delete the Seldon Deployment.
 func deleteSeldonDeployment(client client.Client, name, namespace string) error {
 	sd := &seldonv1.SeldonDeployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -231,7 +231,7 @@ func deleteSeldonDeployment(client client.Client, name, namespace string) error 
 		},
 	}
 	if err := client.Delete(context.TODO(), sd); err != nil {
-		log.Printf("Unable to Delete Seldon Deployment")
+		log.Print("Unable to Delete Seldon Deployment")
 		return err
 	}
 	return nil

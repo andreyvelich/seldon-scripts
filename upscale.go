@@ -195,13 +195,17 @@ func waitSeldonDeploymentAvailable(client client.Client, name, namespace string)
 }
 
 // Scale Seldon Deployment to the replicasCount replicas.
+// According to this doc: https://docs.seldon.io/projects/seldon-core/en/v1.1.0/graph/scaling.html
+// we can specify replicas at diffrent resource levels.
+// This script changes top level resource replicas which locates in .spec.replicas
 func scaleSeldonDeployment(client client.Client, name, namespace string, replicasCount int32) error {
 	sd := &seldonv1.SeldonDeployment{}
 	if err := client.Get(context.TODO(), types.NamespacedName{Name: name, Namespace: namespace}, sd); err != nil {
 		log.Print("Unable to Get Seldon Deployment")
 		return err
 	}
-	// Modify Replicas and update resource.
+
+	// Modify Replicas and update the resource.
 	sd.Spec.Replicas = &replicasCount
 	if err := client.Update(context.TODO(), sd); err != nil {
 		log.Print("Unable to Update Seldon Deployment")

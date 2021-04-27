@@ -3,7 +3,7 @@
 # This script is used to deploy Kind cluster with Cert manager and Seldon Core.
 set -e
 
-# Verify that appropriate apps are installed and Docker is running.
+# Verify that appropriate apps are installed.
 if [[ ! $(which git) || ! $(which docker) || ! $(which kind) || ! $(which kubectl) || ! $(which kustomize) || ! $(which go) ]]; then
   echo "You must install git, docker, kind, kubectl, kustomize and go to deploy Seldon in Kind cluster"
   exit 1

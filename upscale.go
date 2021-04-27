@@ -61,7 +61,7 @@ func main() {
 	}
 
 	// Step 4. Scale replicas to 2 for the Seldon Deployment.
-	err = scaleSeldonDeployment(client, name, namespace, &replicas)
+	err = scaleSeldonDeployment(client, name, namespace, replicas)
 	if err != nil {
 		log.Fatalf("Unable to scale Seldon Deployment, error: %v", err)
 	}
@@ -195,14 +195,14 @@ func waitSeldonDeploymentAvailable(client client.Client, name, namespace string)
 }
 
 // Scale Seldon Deployment to the replicasCount replicas.
-func scaleSeldonDeployment(client client.Client, name, namespace string, replicasCount *int32) error {
+func scaleSeldonDeployment(client client.Client, name, namespace string, replicasCount int32) error {
 	sd := &seldonv1.SeldonDeployment{}
 	if err := client.Get(context.TODO(), types.NamespacedName{Name: name, Namespace: namespace}, sd); err != nil {
 		log.Print("Unable to Get Seldon Deployment")
 		return err
 	}
 	// Modify Replicas and update resource.
-	sd.Spec.Replicas = replicasCount
+	sd.Spec.Replicas = &replicasCount
 	if err := client.Update(context.TODO(), sd); err != nil {
 		log.Print("Unable to Update Seldon Deployment")
 		return err

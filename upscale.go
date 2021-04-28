@@ -142,7 +142,7 @@ func printEvents(clientset *kubernetes.Clientset, UID, namespace string) {
 	}
 }
 
-// Create Seldon Deployment from the given YAML path.
+// Create the Seldon Deployment from the given YAML path.
 // Returns Deployment name, UID and namespace
 func createSeldonDeployment(client client.Client, deployYAMLPath string) (string, string, string, error) {
 
@@ -166,7 +166,7 @@ func createSeldonDeployment(client client.Client, deployYAMLPath string) (string
 
 	// Create SeldonDeployment.
 	if err := client.Create(context.Background(), sd); err != nil {
-		log.Printf("Unable to create Seldon Deployment %v", sd)
+		log.Printf("Unable to Create Seldon Deployment %v", sd)
 		return "", "", "", err
 	}
 
@@ -197,7 +197,7 @@ func waitSeldonDeploymentAvailable(client client.Client, name, namespace string)
 // Scale Seldon Deployment to the replicasCount replicas.
 // According to this doc: https://docs.seldon.io/projects/seldon-core/en/v1.1.0/graph/scaling.html
 // we can specify replicas at diffrent resource levels.
-// This script changes top level resource replicas which locates in .spec.replicas
+// This script changes the top level resource replicas which locates in .spec.replicas
 func scaleSeldonDeployment(client client.Client, name, namespace string, replicasCount int32) error {
 	sd := &seldonv1.SeldonDeployment{}
 	if err := client.Get(context.TODO(), types.NamespacedName{Name: name, Namespace: namespace}, sd); err != nil {
